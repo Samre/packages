@@ -6,29 +6,28 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=node
 
+ifeq ($(CONFIG_NODEJS_21),y)
+PKG_VERSION:=v21.7.1
+PKG_RELEASE:=1
+PKG_HASH:=1272b6e129d564dbde17527b844210b971c20a70ae729268186b7cb9d990a64b
+PATCH_DIR:=./patches/v21.x
+NODEJS_BIN_SUM:=cb25d7a4aa57d15f280ce45cd72f95e9d2020702b7ca75c7fe632444f7c0452c
+NODE_MODULE_VERSION:=120
+else
 ifeq ($(CONFIG_NODEJS_18),y)
-PKG_VERSION:=v18.15.0
+PKG_VERSION:=v18.19.1
 PKG_RELEASE:=1
-PKG_HASH:=8e44d65018ff973284195c23186469a0ea4082e97ec4200e5f5706d5584daa37
+PKG_HASH:=090f96a2ecde080b6b382c6d642bca5d0be4702a78cb555be7bf02b20bd16ded
 PATCH_DIR:=./patches/v18.x
+NODEJS_BIN_SUM:=f35f24edd4415cd609a2ebc03be03ed2cfe211d7333d55c752d831754fb849f0
+NODE_MODULE_VERSION:=108
 else
-ifeq ($(CONFIG_NODEJS_16),y)
-PKG_VERSION:=v16.19.1
+PKG_VERSION:=v20.11.1
 PKG_RELEASE:=1
-PKG_HASH:=17fb716406198125b30c94dd3d1756207b297705626afe16d8dc479a65a1d8b5
-PATCH_DIR:=./patches/v16.x
-else
-ifeq ($(CONFIG_NODEJS_14),y)
-PKG_VERSION:=v14.21.3
-PKG_RELEASE:=1
-PKG_HASH:=458ec092e60ad700ddcf079cb63d435c15da4c7bb3d3f99b9a8e58a99e54075e
-PATCH_DIR:=./patches/v14.x
-else
-PKG_VERSION:=v12.22.12
-PKG_RELEASE:=2
-PKG_HASH:=bc42b7f8495b9bfc7f7850dd180bb02a5bdf139cc232b8c6f02a6967e20714f2
-PATCH_DIR:=./patches/v12.x
-endif
+PKG_HASH:=77813edbf3f7f16d2d35d3353443dee4e61d5ee84d9e3138c7538a3c0ca5209e
+PATCH_DIR:=./patches/v20.x
+NODEJS_BIN_SUM:=d8dab549b09672b03356aa2257699f3de3b58c96e74eb26a8b495fbdc9cf6fbe
+NODE_MODULE_VERSION:=115
 endif
 endif
 
@@ -46,7 +45,6 @@ HOST_BUILD_PARALLEL:=1
 PKG_BUILD_DEPENDS:=python3/host
 PKG_BUILD_PARALLEL:=1
 PKG_INSTALL:=1
-PKG_USE_MIPS16:=0
 PKG_ASLR_PIE:=0
 
 include $(INCLUDE_DIR)/host-build.mk
@@ -58,9 +56,10 @@ define Package/node
   SUBMENU:=Node.js
   TITLE:=Node.js is a platform built on Chrome's JavaScript runtime
   URL:=https://nodejs.org/
-  DEPENDS:=@(HAS_FPU||KERNEL_MIPS_FPU_EMULATOR||SOFT_FLOAT) @!arc @!armeb @!powerpc \
-	   +libstdcpp +NODEJS_18:libopenssl +zlib +libnghttp2 +libuv \
+  DEPENDS:=@HAS_FPU @(i386||x86_64||arm||aarch64) \
+	   +libstdcpp +libopenssl +zlib +libnghttp2 \
 	   +libcares +libatomic +NODEJS_ICU_SYSTEM:icu +NODEJS_ICU_SYSTEM:icu-full-data
+  ABI_VERSION:=$(NODE_MODULE_VERSION)
 endef
 
 define Package/node/description
@@ -69,7 +68,7 @@ define Package/node/description
    package ecosystem, npm, is the largest ecosystem of open source libraries in the world.
 
   *** The following preparations must be made on the host side. ***
-      1. gcc 8.3 or higher is required.
+      1. gcc 10.1 or higher is required.
       2. To build a 32-bit target, gcc-multilib, g++-multilib are required.
       3. Requires libatomic package. (If necessary, install the 32-bit library at the same time.)
      ex) sudo apt-get install gcc-multilib g++-multilib
@@ -93,26 +92,19 @@ define Package/node/config
 
 	choice
 		prompt "Version Selection"
-		default NODEJS_12 if mips||mipsel||mips64||mips64el
-		default NODEJS_16
+		default NODEJS_20
 		help
 		 Select node.js version.
 		 The host package version is also the same.
 
-		config NODEJS_12
-			bool "12.x Maintenance LTS"
-
-		config NODEJS_14
-			depends on !(mips||mipsel||mips64||mips64el)
-			bool "14.x Maintenance"
-
-		config NODEJS_16
-			depends on !(mips||mipsel||mips64||mips64el)
-			bool "16.x Maintenance"
-
 		config NODEJS_18
-			depends on !(mips||mipsel||mips64||mips64el)
-			bool "18.x Active LTS"
+			bool "18.x Maintenance LTS"
+
+		config NODEJS_20
+			bool "20.x Active LTS"
+
+		config NODEJS_21
+			bool "21.x Current"
 	endchoice
 
 	if PACKAGE_node
@@ -126,23 +118,37 @@ define Package/node/config
 				bool "Disable"
 
 			config NODEJS_ICU_SMALL
-				depends on !BIG_ENDIAN
 				bool "small-icu"
 
 			config NODEJS_ICU_SYSTEM
-				depends on ARCH_64BIT&&!BIG_ENDIAN
+				depends on ARCH_64BIT
 				bool "system-icu"
 		endchoice
 	endif
 
+	config NODEJS_NPM_KEEP_CACHE
+		bool "keep npm cache (experimental)"
+		help
+		  Keep npm package cache.
+		  More space will be consumed by the cache.
+
+	config NODEJS_NPM_CACHE_DIR
+		string "Set npm cache directory" if NODEJS_NPM_KEEP_CACHE
+		default ""
+		help
+		  Store npm cache in this directory.
+		  If not set, uses './tmp'
+
+	config NODEJS_HOST_BIN
+		bool "Install the official nodejs binary package as HOSTPKG (experimental)"
+		depends on HOST_OS_LINUX
+		help
+		  Reduce build time for the host package.
+
 	endmenu
 endef
 
-NODEJS_CPU:=$(subst powerpc,ppc,$(subst aarch64,arm64,$(subst x86_64,x64,$(subst i386,ia32,$(ARCH)))))
-
-ifeq ($(CONFIG_NODEJS_10),y)
-TARGET_LDFLAGS+=-latomic
-endif
+NODEJS_CPU:=$(subst aarch64,arm64,$(subst x86_64,x64,$(subst i386,ia32,$(ARCH))))
 
 ifneq ($(CONFIG_ARCH_64BIT),y)
 FORCE_32BIT:=-m32
@@ -167,16 +173,16 @@ CONFIGURE_ARGS:= \
 	--dest-os=linux \
 	--cross-compiling \
 	--shared-zlib \
-	$(if $(CONFIG_NODEJS_18),--shared-openssl) \
+	--shared-openssl \
 	--shared-nghttp2 \
 	--shared-cares \
 	--with-intl=$(if $(CONFIG_NODEJS_ICU_SMALL),small-icu,$(if $(CONFIG_NODEJS_ICU_SYSTEM),system-icu,none)) \
-	$(if $(findstring mips,$(NODEJS_CPU)), \
-		$(if $(CONFIG_SOFT_FLOAT),--with-mips-float-abi=soft)) \
-	$(if $(findstring +neon,$(CONFIG_CPU_TYPE)),--with-arm-fpu=neon) \
-	$(if $(findstring +vfp",$(CONFIG_CPU_TYPE)),--with-arm-fpu=vfp) \
-	$(if $(findstring +vfpv3",$(CONFIG_CPU_TYPE)),--with-arm-fpu=vfpv3-d16) \
+	$(if $(findstring +neon",$(CONFIG_CPU_TYPE)),--with-arm-fpu=neon) \
+	$(if $(findstring +neon-vfpv4",$(CONFIG_CPU_TYPE)),--with-arm-fpu=neon) \
 	$(if $(findstring +vfpv4",$(CONFIG_CPU_TYPE)),--with-arm-fpu=vfpv3) \
+	$(if $(findstring +vfp",$(CONFIG_CPU_TYPE)),--with-arm-fpu=vfp) \
+	$(if $(findstring +vfpv3",$(CONFIG_CPU_TYPE)),--with-arm-fpu=vfpv3) \
+	$(if $(findstring +vfpv3-d16",$(CONFIG_CPU_TYPE)),--with-arm-fpu=vfpv3-d16) \
 	--prefix=/usr
 
 HOST_CONFIGURE_VARS:=
@@ -208,15 +214,53 @@ define Package/node-npm/install
 	$(LN) ../lib/node_modules/npm/bin/npx-cli.js $(1)/usr/bin/npx
 endef
 
-define Host/Install
-	$(RM) -rf $(1)/lib/node_modules/npm
-	$(call Host/Install/Default)
-endef
-
 define Package/node-npm/postrm
 #!/bin/sh
 rm -rf /usr/lib/node_modules/npm || true
 endef
+
+ifeq ($(CONFIG_NODEJS_HOST_BIN),y)
+
+NODEJS_BIN:=node-$(PKG_VERSION)-linux-x64.tar.xz
+
+define Download/nodebin
+	URL:=https://nodejs.org/download/release/$(PKG_VERSION)/
+	FILE:=$(NODEJS_BIN)
+	HASH:=$(NODEJS_BIN_SUM)
+endef
+
+define Host/Prepare
+	$(eval $(call Download,nodebin))
+endef
+
+define Host/Configure
+	# nothing to do
+endef
+
+define Host/Compile
+	# nothing to do
+endef
+
+define Host/Install
+	rm -f $(1)/bin/npm
+	rm -f $(1)/bin/npx
+	rm -rf $(1)/lib/node_modules/npm
+	rm -f $(1)/bin/corepack
+	rm -rf $(1)/lib/node_modules/corepack
+	$(TAR) xvfJ $(DL_DIR)/$(NODEJS_BIN) -C $(1) --strip-components=1
+	rm -f $(1)/{CHANGELOG.md,LICENSE,README.md}
+endef
+
+else
+define Host/Install
+	rm -f $(1)/bin/npm
+	rm -f $(1)/bin/npx
+	rm -rf $(1)/lib/node_modules/npm
+	rm -f $(1)/bin/corepack
+	rm -rf $(1)/lib/node_modules/corepack
+	$(call Host/Install/Default)
+endef
+endif
 
 $(eval $(call HostBuild))
 $(eval $(call BuildPackage,node))
